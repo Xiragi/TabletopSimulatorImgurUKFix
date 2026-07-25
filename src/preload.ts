@@ -4,6 +4,8 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getDefaultPath: () => ipcRenderer.invoke('app:getDefaultPath'),
   getProviderInfo: () => ipcRenderer.invoke('app:getProviderInfo'),
   getVersion: () => ipcRenderer.invoke('app:getVersion'),
+  openExternal: (url: string) => ipcRenderer.invoke('app:openExternal', url),
+  checkForUpdate: () => ipcRenderer.invoke('app:checkForUpdate'),
   checkImgur: () => ipcRenderer.invoke('net:checkImgur'),
   openDirectory: () => ipcRenderer.invoke('dialog:openDirectory'),
   scanDirectory: (path: string) => ipcRenderer.invoke('fs:scanDirectory', path),

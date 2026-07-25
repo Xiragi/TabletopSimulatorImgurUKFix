@@ -28,6 +28,7 @@ function App() {
   const [hideConverted, setHideConverted] = useState(false);
   const [combineRows, setCombineRows] = useState(true);
   const [appVersion, setAppVersion] = useState('');
+  const [updateInfo, setUpdateInfo] = useState<{hasUpdate: boolean, latestVersion: string, releaseUrl: string} | null>(null);
 
   const addLog = (msg: string, type: 'info' | 'error' | 'warning') => {
     if (type === 'error') console.error(`[UI Console] ${msg}`);
@@ -53,6 +54,11 @@ function App() {
       
       const ver = await window.electronAPI.getVersion();
       setAppVersion(ver);
+      
+      const updateData = await window.electronAPI.checkForUpdate();
+      if (updateData) {
+        setUpdateInfo(updateData);
+      }
     };
     fetchInitialData().catch(console.error);
 
@@ -220,7 +226,22 @@ function App() {
         <GameTable displayResults={displayResults} onConvert={handleConvert} hasScanned={hasScanned} />
         
         <Box className="status-bar">
-          <span style={{ fontSize: '12px', color: '#666', fontWeight: 500 }}>v{appVersion}</span>
+          <Box sx={{ display: 'flex', alignItems: 'center', padding: '4px 12px' }}>
+            <span style={{ fontSize: '12px', color: '#666', fontWeight: 500 }}>v{appVersion}</span>
+          </Box>
+          
+          {updateInfo?.hasUpdate && (
+            <a 
+              href={updateInfo.releaseUrl} 
+              onClick={(e) => {
+                e.preventDefault();
+                window.electronAPI.openExternal(updateInfo.releaseUrl);
+              }}
+              style={{ display: 'flex', alignItems: 'center', fontSize: '12px', color: '#ffffff', backgroundColor: '#1976d2', padding: '4px 12px', fontWeight: 'bold', textDecoration: 'none', cursor: 'pointer' }}
+            >
+              Update Available (v{updateInfo.latestVersion})
+            </a>
+          )}
         </Box>
       </Box>
       

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'path';
 import os from 'os';
 
@@ -58,6 +58,30 @@ app.whenReady().then(() => {
 
   ipcMain.handle('app:getVersion', () => {
     return app.getVersion();
+  });
+  
+  ipcMain.handle('app:openExternal', (event, url) => {
+    shell.openExternal(url);
+  });
+
+  ipcMain.handle('app:checkForUpdate', async () => {
+    try {
+      const res = await fetch('https://api.github.com/repos/Xiragi/TabletopSimulatorImgurFix/releases/latest', {
+        headers: { 'User-Agent': 'TableTopSimulatorImgurConverter' }
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      const latestTag = data.tag_name || '';
+      const latestVersion = latestTag.startsWith('v') ? latestTag.substring(1) : latestTag;
+      
+      const currentVersion = app.getVersion();
+      const hasUpdate = latestVersion !== currentVersion && latestVersion !== '';
+      
+      return { hasUpdate, latestVersion, releaseUrl: data.html_url };
+    } catch (e) {
+      console.error('Failed to check for updates', e);
+      return null;
+    }
   });
 
   let conversionMutex = Promise.resolve();
