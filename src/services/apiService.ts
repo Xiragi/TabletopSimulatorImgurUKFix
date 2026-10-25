@@ -1,3 +1,5 @@
+import { Catbox } from 'node-catbox';
+
 export interface UploadProvider {
   id: string;
   name: string;
@@ -9,32 +11,13 @@ export class CatboxUrlProvider implements UploadProvider {
   id = 'catbox-url-upload';
   name = 'Catbox.moe (URL Upload)';
   requiresLocalDownload = false;
+  private readonly client = new Catbox(undefined, {
+    requestTimeoutMs: 15000,
+    retryTransientErrors: false
+  });
 
   async uploadUrl(link: string): Promise<string> {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), 15000); 
-    
-    try {
-      const body = new FormData();
-      body.append('reqtype', 'urlupload');
-      body.append('url', link);
-      
-      const res = await fetch('https://catbox.moe/user/api.php', {
-        method: 'POST',
-        body: body as any,
-        signal: controller.signal
-      });
-      
-      if (!res.ok) throw new Error(`HTTP Error ${res.status}`);
-      
-      const catboxUrl = await res.text();
-      if (!catboxUrl.startsWith('http')) {
-        throw new Error(`Catbox API returned invalid URL: ${catboxUrl}`);
-      }
-      return catboxUrl;
-    } finally {
-      clearTimeout(timeoutId);
-    }
+    return this.client.uploadURL({ url: link });
   }
 }
 
