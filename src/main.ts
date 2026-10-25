@@ -1,8 +1,10 @@
+import { getServiceStatuses } from './services/serviceStatusService';
 import { app, BrowserWindow, ipcMain, dialog, shell } from 'electron';
 import path from 'path';
 import os from 'os';
 
-import { checkImgurConnectivity, uploadProviders } from './services/apiService';
+import { checkImgurConnectivity } from './services/apiService';
+import { getBackendInfo, defaultBackendId } from './services/backends/registry';
 import { convertGame, currentCancelToken, incrementCancelToken } from './services/converterService';
 import { scanDirectoryForGames } from './services/scannerService';
 
@@ -44,14 +46,9 @@ app.whenReady().then(() => {
     }
   });
 
-  ipcMain.handle('app:getProviderInfo', () => {
-    const active = uploadProviders['catbox-url-upload'];
-    return {
-      id: active.id,
-      name: active.name,
-      requiresLocalDownload: active.requiresLocalDownload
-    };
-  });
+  ipcMain.handle('app:getProviderInfo', () => getBackendInfo());
+
+  ipcMain.handle('net:getServiceStatuses', () => getServiceStatuses());
 
   ipcMain.handle('net:checkImgur', async () => {
     return await checkImgurConnectivity();
@@ -91,7 +88,7 @@ app.whenReady().then(() => {
     incrementCancelToken();
   });
 
-  ipcMain.handle('convert:imgur', async (event, dirPath, fileId, forceRestart = false) => {
+  ipcMain.handle('convert:imgur', async (event, dirPath, fileId, forceRestart = false, backendId = defaultBackendId) => {
     let releaseMutex: () => void;
     const nextMutex = new Promise<void>(r => releaseMutex = r);
     const oldMutex = conversionMutex;
@@ -105,7 +102,7 @@ app.whenReady().then(() => {
       if (token !== currentCancelToken) {
         return { success: false, error: 'Cancelled by user' };
       }
-      return await convertGame(dirPath, fileId, event.sender, token, forceRestart);
+      return await convertGame(dirPath, fileId, event.sender, token, forceRestart, backendId);
     } catch (err: any) {
       console.error(err);
       event.sender.send('backend:log', `[${fileId}] Fatal Error: ${err.message}`, 'error');

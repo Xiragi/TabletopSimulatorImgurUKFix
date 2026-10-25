@@ -34,3 +34,9 @@ You can compile the app yourself by doing `pnpm run release`. I am using `pnpm`,
    pnpm run release
    ```
 The compiled binaries will be in the `release/` folder.
+
+## Image backends
+
+The default **Automatic (recommended)** mode tries Catbox, then `imgur.kageurufu.net`, then `external-content.duckduckgo.com`. You can also choose a single backend. Backend use is recorded in the console. Once a fallback works, it is reused for the rest of that game.
+
+Catbox provides the permanent fix by rehosting images. Kageurufu and DuckDuckGo provide temporary proxy fixes that still depend on Imgur and the proxy. The app warns when these are used and marks affected games after scanning. Use **Rehost with Catbox** when Catbox uploads are available again to convert from the original save.

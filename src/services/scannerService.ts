@@ -1,3 +1,4 @@
+import { containsTemporaryFix } from './backends/registry';
 import fs from 'fs';
 import path from 'path';
 import { getProgressFile } from './progressService';
@@ -39,7 +40,7 @@ export function scanDirectoryForGames(dirPath: string, sender: any) {
       let imgurCount = 0;
       let nonImgurCount = 0;
       for (const url of uniqueUrls) {
-        if (url.includes('imgur.com')) {
+        if (/^https?:\/\/(?:i\.)?imgur\.com\//i.test(url)) {
           imgurCount++;
         } else {
           nonImgurCount++;
@@ -57,6 +58,8 @@ export function scanDirectoryForGames(dirPath: string, sender: any) {
         imgurCount,
         nonImgurCount,
         imagePath: hasPng ? pngPath : null,
+        temporaryFix: containsTemporaryFix(content),
+        originalId: fs.existsSync(path.join(dirPath, `${baseName.replace(/_converted$/, '')}.json`)) ? baseName.replace(/_converted$/, '') : undefined,
         isConverted: baseName.endsWith('_converted'),
         isResumable: !!prog,
         savedCompleted: prog ? prog.completedCount : 0,

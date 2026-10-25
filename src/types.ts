@@ -13,6 +13,8 @@ export interface GameItem {
   savedCompleted?: number;
   savedTotal?: number;
   hasUpdate?: boolean;
+  temporaryFix?: boolean;
+  originalId?: string;
 }
 
 export interface ServiceStatus {

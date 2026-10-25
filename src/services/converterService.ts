@@ -1,6 +1,7 @@
 import fs from 'fs';
 import path from 'path';
-import {uploadProviders} from './apiService';
+import {defaultBackendId, getBackendProviders, isTemporaryFixUrl} from './backends/registry';
+import {BackendSession} from './backendService';
 import {addGoldBorderToImage} from './imageService';
 import {getProgressFile, saveProgressIncrementally, cleanupProgress} from './progressService';
 
@@ -9,12 +10,26 @@ export function incrementCancelToken() {
   currentCancelToken++;
 }
 
-export async function convertGame(dirPath: string, fileId: string, sender: any, startToken: number, forceRestart: boolean = false): Promise<any> {
+export async function convertGame(dirPath: string, fileId: string, sender: any, startToken: number, forceRestart: boolean = false, backendId: string = defaultBackendId): Promise<any> {
+  const backend = new BackendSession(getBackendProviders(backendId), {
+    log: (message, type) => sender.send('backend:log', `[${fileId}] ${message}`, type),
+    onServiceStatus: status => sender.send('backend:serviceStatus', status),
+    onProvider: provider => sender.send('convert:backend', fileId, { id: provider.id, name: provider.name, temporary: provider.temporary }),
+    isCancelled: () => startToken !== currentCancelToken
+  });
   const fullPath = path.join(dirPath, `${fileId}.json`);
   const convertedPath = path.join(dirPath, `${fileId}_converted.json`);
   const pngPath = path.join(dirPath, `${fileId}.png`);
   const convertedPngPath = path.join(dirPath, `${fileId}_converted.png`);
   
+  let content = fs.readFileSync(fullPath, 'utf-8');
+
+  const imgurRegex = /https?:\/\/(?:i\.)?imgur\.com\/[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)?/g;
+  const matches = content.match(imgurRegex) || [];
+  const uniqueLinks = [...new Set(matches)];
+  const totalCount = uniqueLinks.length;
+  if (totalCount === 0) return { success: true, noChanges: true, convertedCount: 0, remainingImgurCount: 0, temporaryFix: false };
+
   if (fs.existsSync(pngPath)) {
     try {
       await addGoldBorderToImage(pngPath, convertedPngPath);
@@ -23,13 +38,6 @@ export async function convertGame(dirPath: string, fileId: string, sender: any, 
       fs.copyFileSync(pngPath, convertedPngPath);
     }
   }
-  
-  let content = fs.readFileSync(fullPath, 'utf-8');
-  
-  const imgurRegex = /https?:\/\/(?:i\.)?imgur\.com\/[a-zA-Z0-9]+(?:\.[a-zA-Z0-9]+)?/g;
-  const matches = content.match(imgurRegex) || [];
-  const uniqueLinks = [...new Set(matches)];
-  const totalCount = uniqueLinks.length;
   
   const { progressPath, progressData } = getProgressFile(dirPath, sender);
   
@@ -43,41 +51,44 @@ export async function convertGame(dirPath: string, fileId: string, sender: any, 
   
   sender.send('convert:progress', fileId, completedCount, totalCount);
   
+  if (Object.values(linkMap).some(isTemporaryFixUrl)) {
+    sender.send('convert:temporaryFix', fileId);
+  }
+
   const linksToUpload = uniqueLinks.filter(link => !linkMap[link]);
   
   for (const link of linksToUpload) {
-    const maxAttempts = 5;
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      if (startToken !== currentCancelToken) {
+    try {
+      const newUrl = await backend.resolve(link);
+      linkMap[link] = newUrl;
+      if (isTemporaryFixUrl(newUrl)) {
+        sender.send('convert:temporaryFix', fileId);
+      }
+      saveProgressIncrementally(progressPath, fileId, linkMap, completedCount + 1, totalCount, sender);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (message === 'Cancelled by user') {
         sender.send('backend:log', `[${fileId}] Conversion cancelled by user. Wiping partial progress.`, 'warning');
         cleanupProgress(progressPath, fileId, sender);
-        return { success: false, error: 'Cancelled by user' };
+      } else {
+        sender.send('backend:log', `[${fileId}] ${message}. Saved progress is available to resume.`, 'error');
       }
-      
-      try {
-        const provider = uploadProviders['catbox-url-upload'];
-        linkMap[link] = await provider.uploadUrl(link);
-        saveProgressIncrementally(progressPath, fileId, linkMap, completedCount + 1, totalCount, sender);
-        break; 
-      } catch (e: any) {
-        const isLastAttempt = attempt === maxAttempts;
-        const errorMsg = e.name === 'AbortError' ? 'Request timed out (15s)' : e.message;
-        
-        if (isLastAttempt) {
-          console.error(`Failed to upload ${link} after 5 attempts`, e);
-          sender.send('backend:log', `[${fileId}] Failed to upload ${link} after 5 attempts: ${errorMsg}`, 'error');
-        } else {
-          sender.send('backend:log', `[${fileId}] Upload attempt ${attempt}/5 failed for ${link}: ${errorMsg}. Retrying...`, 'warning');
-          await new Promise(r => setTimeout(r, 2000));
-        }
-      }
+      return { success: false, error: message, convertedCount: Object.keys(linkMap).length };
     }
-    
+
     completedCount++;
     sender.send('convert:progress', fileId, completedCount, totalCount);
-    await new Promise(r => setTimeout(r, 500));
+    const delay = backend.delayBetweenLinksMs;
+    if (delay > 0 || completedCount % 100 === 0) {
+      await new Promise(r => setTimeout(r, delay));
+    }
   }
   
+  if (startToken !== currentCancelToken) {
+    cleanupProgress(progressPath, fileId, sender);
+    return { success: false, error: 'Cancelled by user' };
+  }
+
   for (const [original, newUrl] of Object.entries(linkMap)) {
     content = content.split(original).join(newUrl);
   }
@@ -110,5 +121,6 @@ export async function convertGame(dirPath: string, fileId: string, sender: any, 
     }
   }
   
-  return { success: true, newPath: convertedPath, convertedCount: Object.keys(linkMap).length };
+  const temporaryFix = Object.values(linkMap).some(isTemporaryFixUrl);
+  return { success: true, newPath: convertedPath, convertedCount: Object.keys(linkMap).length, remainingImgurCount: new Set(content.match(imgurRegex) || []).size, temporaryFix };
 }

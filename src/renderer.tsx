@@ -2,7 +2,7 @@ import React, { useState, useEffect, useMemo } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Box } from '@mui/material';
 
-import { GameItem } from './types';
+import { GameItem, ServiceStatus } from './types';
 import { TopBar } from './components/TopBar';
 import { FilterBar } from './components/FilterBar';
 import { GameTable } from './components/GameTable';
@@ -38,10 +38,31 @@ function App() {
     setLogs(prev => [...prev, {msg, type, time: new Date().toLocaleTimeString()}]);
   };
 
-  const [providerInfo, setProviderInfo] = useState<{name: string, requiresLocalDownload: boolean} | null>(null);
+  const [providerInfo, setProviderInfo] = useState<{name: string, permanentBackend: {id: string, shortName: string} | null, requiresLocalDownload: boolean, providers: {id: string, name: string, shortName: string}[]} | null>(null);
+  const [backendId, setBackendId] = useState('auto');
+  const [temporaryFixGames, setTemporaryFixGames] = useState<string[]>([]);
+  const [serviceStatuses, setServiceStatuses] = useState<ServiceStatus[]>([]);
+  const [checkingServices, setCheckingServices] = useState(false);
+  const refreshServices = async () => {
+    setCheckingServices(true);
+    try {
+      const statuses: ServiceStatus[] = await window.electronAPI.getServiceStatuses();
+      setServiceStatuses(prev => statuses.map(status => {
+        const current = prev.find(item => item.id === status.id);
+        return current && current.checkedAt > status.checkedAt ? current : status;
+      }));
+    } catch (error) {
+      addLog(`Service status check failed: ${String(error)}`, 'warning');
+    } finally { setCheckingServices(false); }
+  };
   const [imgurStatus, setImgurStatus] = useState({ text: 'Checking...', status: 'info' });
 
   useEffect(() => {
+    refreshServices();
+    const serviceInterval = setInterval(refreshServices, 60_000);
+    const unsubscribeService = window.electronAPI.onServiceStatus((status: ServiceStatus) => {
+      setServiceStatuses(prev => [...prev.filter(item => item.id !== status.id), status]);
+    });
     let currentProvider: any = null;
 
     const fetchInitialData = async () => {
@@ -82,6 +103,11 @@ function App() {
       checkConnectivity().catch(console.error);
     }, 3 * 60 * 1000);
     
+    const unsubscribeTemporaryFix = window.electronAPI.onTemporaryFix((fileId: string) => {
+      setTemporaryFixGames(prev => prev.includes(fileId) ? prev : [...prev, fileId]);
+      setResults(prev => prev.map(item => item.id === fileId ? { ...item, temporaryFix: true } : item));
+    });
+
     window.electronAPI.onLog((msg: string, type: 'info' | 'error' | 'warning') => {
       addLog(msg, type);
     });
@@ -95,7 +121,7 @@ function App() {
       }));
     });
 
-    return () => clearInterval(interval);
+    return () => { clearInterval(interval); clearInterval(serviceInterval); unsubscribeService(); unsubscribeTemporaryFix(); };
   }, []);
 
   const handleScan = async () => {
@@ -104,9 +130,10 @@ function App() {
     setResults([]);
     try {
       const res = await window.electronAPI.scanDirectory(dirPath);
+      setTemporaryFixGames(res.filter((r: GameItem) => r.temporaryFix).map((r: GameItem) => r.originalId || r.id));
       setResults(res.map((r: any) => ({
         ...r, 
-        convertState: r.isResumable ? 'Incomplete' : 'Convert', 
+        convertState: r.isResumable ? 'Incomplete' : r.convertState || (r.isConverted ? 'Done' : 'Convert'),
         completedCount: r.savedCompleted || 0,
         progress: r.isResumable ? `${r.savedCompleted} / ${r.savedTotal}` : undefined
       })));
@@ -118,14 +145,18 @@ function App() {
     }
   };
 
-  const handleConvert = async (item: GameItem, forceRestart: boolean = false) => {
+  const handleConvert = async (item: GameItem, forceRestart: boolean = false, selectedBackendId: string = backendId) => {
     setIsConsoleOpen(true);
-    setResults(prev => prev.map(r => r.id === item.id ? { ...r, convertState: 'Queued...' } : r));
+    setResults(prev => prev.map(r => r.id === item.id ? { ...r, convertState: 'Queued...', isConverted: false } : r));
     addLog(`Queued conversion for ${item.id} (${item.saveName})...`, 'info');
     
-    const res = await window.electronAPI.convertImgur(dirPath, item.id, forceRestart);
-    if (res.success) {
-      setResults(prev => prev.map(r => r.id === item.id ? { ...r, convertState: 'Done', isConverted: true, completedCount: r.imgurCount, progress: `${r.imgurCount} / ${r.imgurCount}` } : r));
+    const res = await window.electronAPI.convertImgur(dirPath, item.id, forceRestart, selectedBackendId);
+    if (res.success && res.noChanges) {
+      setResults(prev => prev.map(r => r.id === item.id ? { ...r, convertState: 'No Imgur links', isConverted: item.isConverted, hasImgur: false, imgurCount: 0 } : r));
+      addLog(`No Imgur links found in ${item.saveName} (ID: ${item.id}); nothing to replace.`, 'info');
+    } else if (res.success) {
+      if (!res.temporaryFix) setTemporaryFixGames(prev => prev.filter(id => id !== item.id));
+      setResults(prev => prev.map(r => (r.id === item.id || r.id === `${item.id}_converted`) ? { ...r, temporaryFix: res.temporaryFix, hasImgur: res.remainingImgurCount > 0, imgurCount: res.remainingImgurCount, convertState: 'Done', isConverted: true, completedCount: res.convertedCount, progress: `${res.convertedCount} / ${res.convertedCount}` } : r));
       addLog(`Finished converting game: ${item.saveName} (ID: ${item.id}). Replaced ${res.convertedCount} links.`, 'info');
     } else {
       if (res.error === 'Cancelled by user') return;
@@ -179,7 +210,7 @@ function App() {
     results.forEach(r => {
       if (r.convertState === 'Queued...' || r.convertState === 'Converting...' || r.convertState === 'Incomplete' || (r.convertState === 'Done' && r.completedCount !== undefined)) {
         activeConversions++;
-        overallTotal += r.imgurCount;
+        overallTotal += r.convertState === 'Done' ? r.completedCount : r.imgurCount;
         overallCompleted += (r.completedCount || 0);
       }
     });
@@ -209,6 +240,8 @@ function App() {
           dirPath={dirPath} setDirPath={setDirPath} 
           isScanning={isScanning} onScan={handleScan}
           imgurStatus={imgurStatus} providerInfo={providerInfo}
+          backendId={backendId} setBackendId={setBackendId} temporaryFixGames={temporaryFixGames}
+          serviceStatuses={serviceStatuses} checkingServices={checkingServices} onRefreshServices={refreshServices}
           isConsoleOpen={isConsoleOpen} setIsConsoleOpen={setIsConsoleOpen}
           overallPercent={activeConversions > 0 ? overallPercent : 0} 
           overallCompleted={overallCompleted} overallTotal={activeConversions > 0 ? overallTotal : 0}
@@ -223,7 +256,11 @@ function App() {
           combineRows={combineRows} setCombineRows={setCombineRows}
         />
         
-        <GameTable displayResults={displayResults} onConvert={handleConvert} hasScanned={hasScanned} />
+        <GameTable displayResults={displayResults} onConvert={handleConvert} hasScanned={hasScanned} isConvertingAny={isConvertingAny} permanentBackendName={providerInfo?.permanentBackend?.shortName}
+          onRehost={(item: GameItem) => {
+            const original = results.find(r => r.id === item.originalId);
+            if (original && providerInfo?.permanentBackend) handleConvert(original, true, providerInfo.permanentBackend.id);
+          }} />
         
         <Box className="status-bar">
           <Box sx={{ display: 'flex', alignItems: 'center', padding: '4px 12px' }}>

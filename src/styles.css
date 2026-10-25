@@ -53,13 +53,16 @@
 
 /* Game Table Rows */
 .row-update { background-color: #e6f2ff !important; }
-.row-converted { background-color: #e6ccff !important; }
+.row-partial { background-color: #e6ccff !important; }
 .row-queued { background-color: #ffebcc !important; }
 .row-converting { background-color: #e6f7ff !important; }
 .row-done { background-color: #e6ffed !important; }
 .row-incomplete { background-color: #fff5cc !important; }
 .row-error { background-color: #ffcccc !important; }
 .row-needs-convert { background-color: #ffe6e6 !important; }
+
+.row-temporary { background-color: #fff0cc !important; }
+.row-no-imgur { background-color: #f4f4f4 !important; }
 
 /* Images */
 .table-image {

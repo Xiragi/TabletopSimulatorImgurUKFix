@@ -1,11 +1,15 @@
 import React from 'react';
 import { Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Paper, Typography, Button, Stack } from '@mui/material';
+import { getGameStatus } from '../gameStatus';
 import { GameItem } from '../types';
 
 interface GameTableProps {
   displayResults: GameItem[];
   onConvert: (item: GameItem, forceRestart?: boolean) => void;
   hasScanned: boolean;
+  isConvertingAny: boolean;
+  permanentBackendName?: string;
+  onRehost: (item: GameItem) => void;
 }
 
 function ActionCell({ item, onConvert }: { item: GameItem, onConvert: (item: GameItem, forceRestart?: boolean) => void }) {
@@ -37,7 +41,7 @@ function ActionCell({ item, onConvert }: { item: GameItem, onConvert: (item: Gam
   return <Typography variant="body2" sx={{ fontWeight: 'bold' }}>{item.convertState}</Typography>;
 }
 
-export function GameTable({ displayResults, onConvert, hasScanned }: GameTableProps) {
+export function GameTable({ displayResults, onConvert, hasScanned, onRehost, isConvertingAny, permanentBackendName }: GameTableProps) {
   return (
     <TableContainer component={Paper} sx={{ flexGrow: 1, overflowY: 'auto', borderRadius: 0 }} elevation={0}>
       <Table stickyHeader size="small">
@@ -68,27 +72,23 @@ export function GameTable({ displayResults, onConvert, hasScanned }: GameTablePr
             </TableRow>
           )}
           {displayResults.map((item, idx) => {
-            let rowClass = '';
-            if (item.convertState === 'Update Available') rowClass = 'row-update';
-            else if (item.isConverted || item.convertState === 'Already Converted') rowClass = 'row-converted';
-            else if (item.convertState === 'Queued...') rowClass = 'row-queued';
-            else if (item.convertState === 'Converting...') rowClass = 'row-converting';
-            else if (item.convertState === 'Done') rowClass = 'row-done';
-            else if (item.convertState === 'Incomplete') rowClass = 'row-incomplete';
-            else if (item.convertState === 'Error') rowClass = 'row-error';
-            else if (item.hasImgur) rowClass = 'row-needs-convert';
-            
+            const status = getGameStatus(item);
+
             return (
-              <TableRow key={`${item.id}-${idx}`} className={rowClass}>
+              <TableRow key={`${item.id}-${idx}`} className={status.className}>
                 <TableCell>
                   {item.imagePath ? <img src={`file://${item.imagePath}`} className="table-image" /> : 'No Image'}
                 </TableCell>
-                <TableCell>{item.saveName}</TableCell>
+                <TableCell>{item.saveName}<Typography variant="caption" display="block">{status.label}</Typography></TableCell>
                 <TableCell>{item.imgurCount}</TableCell>
                 <TableCell>{item.nonImgurCount}</TableCell>
                 <TableCell align="center">
                   <Stack spacing={0.5} alignItems="center">
                     <ActionCell item={item} onConvert={onConvert} />
+                    {item.temporaryFix && <Typography variant="caption" color="warning.main">Temporary proxy fix</Typography>}
+                    {(item.temporaryFix || (item.isConverted && item.hasImgur)) && permanentBackendName && item.originalId && !['Queued...', 'Converting...'].includes(item.convertState) && (
+                      <Button size="small" variant="outlined" disabled={isConvertingAny} onClick={() => onRehost(item)}>Rehost with {permanentBackendName}</Button>
+                    )}
                     {item.progress && <Typography variant="caption" sx={{textAlign: 'center'}}>{item.progress}</Typography>}
                   </Stack>
                 </TableCell>
