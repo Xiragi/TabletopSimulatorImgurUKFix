@@ -14,3 +14,11 @@ export interface GameItem {
   savedTotal?: number;
   hasUpdate?: boolean;
 }
+
+export interface ServiceStatus {
+  id: string;
+  name: string;
+  state: 'available' | 'reachable' | 'paused' | 'unavailable';
+  detail: string;
+  checkedAt: string;
+}
